@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retro Top-Down Racer</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
+            border: 4px solid #fff;
+            background: #222;
+        }
+        canvas {
+            display: block;
+            background: #1b4d1b; /* Grass base */
+        }
+        .controls-hint {
+            margin-top: 15px;
+            color: #aaa;
+            font-size: 13px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="raceCanvas" width="800" height="600"></canvas>
+</div>
+<div class="controls-hint">
+    <strong>CONTROLS:</strong> ARROW KEYS (Drive & Steer) | <strong>GOAL:</strong> Complete 3 Laps Fast!
+</div>
+
+<script>
+const canvas = document.getElementById('raceCanvas');
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+// Game Systems State
+let gameState = 'START'; // START, RACING, FINISHED
+let startTime = 0;
+let elapsedTime = 0;
+let currentLap = 1;
+const totalLaps = 3;
+let bestTime = null;
+
+// Checkpoint system to prevent cheating
+let passedCheckpoint = false;
+
+// Racing Car Configuration Properties
+const car = {
+    x: 400,
+    y: 520,
+    width: 14,
+    height: 26,
+    angle: 0, // In radians
+    speed: 0,
+    maxSpeed: 4.5,
+    accel: 0.12,
+    decel: 0.05,
+    breaking: 0.2,
+    handling: 0.045,
+    color: '#ff2222'
+};
+
+// Keyboard Tracking Object Map
+const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false };
+
+// Track Layout Definitions (Centered inner/outer walls)
+const trackInnerX = 400, trackInnerY = 300, trackInnerR = 140;
+const trackOuterX = 400, trackOuterY = 300, trackOuterR = 260;
+
+// Setup Event Listeners
+window.addEventListener('keydown', e => { if(e.key in keys) keys[e.key] = true; });
+window.addEventListener('keyup', e => { if(e.key in keys) keys[e.key] = false; });
+canvas.addEventListener('click', () => {
+    if (gameState === 'START' || gameState === 'FINISHED') {
+        resetRace();
+    }
+});
+
+function resetRace() {
+    car.x = 400;
+    car.y = 520;
+    car.angle = 0;
+    car.speed = 0;
+    currentLap = 1;
+    passedCheckpoint = false;
+    startTime = Date.now();
+    gameState = 'RACING';
+}
+
+function checkTrackCollision(x, y) {
+    // Calculate distance from center point of the circular circuit track layout
+    const dx = x - 400;
+    const dy = y - 300;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Return true if car leaves the paved asphalt boundaries (Grass penalty area)
+    return (distance < trackInnerR || distance > trackOuterR);
+}
+
+function updatePhysics() {
+    if (gameState !== 'RACING') return;
+
+    // Acceleration & Breaking logic loop
+    if (keys.ArrowUp) {
+        car.speed = Math.min(car.maxSpeed, car.speed + car.accel);
+    } else if (keys.ArrowDown) {
+        car.speed = Math.max(-car.maxSpeed / 2, car.speed - car.breaking);
+    } else {
+        // Natural environment drag friction deceleration
+        if (car.speed > 0) car.speed = Math.max(0, car.speed - car.decel);
+        if (car.speed < 0) car.speed = Math.min(0, car.speed + car.decel);
+    }
+
+    // Dynamic Steering System (Can only turn if vehicle is rolling)
+    if (Math.abs(car.speed) > 0.2) {
+        const turnDirection = car.speed > 0 ? 1 : -1;
+        if (keys.ArrowLeft) car.angle -= car.handling * turnDirection;
+        if (keys.ArrowRight) car.angle += car.handling * turnDirection;
+    }
+
+    // Apply off-track penalty limits if rolling through track perimeter terrain barrier outlines
+    const offRoad = checkTrackCollision(car.x, car.y);
+    const currentMaxSpeed = offRoad ? 1.2 : car.maxSpeed;
+    if (car.speed > currentMaxSpeed) car.speed -= 0.2;
+
+    // Matrix vector calculation conversion shifts player location position vectors forward
+    car.x += Math.cos(car.angle) * car.speed;
+    car.y += Math.sin(car.angle) * car.speed;
+
+    // --- GAME LOGIC RULES: CHECKPOINTS & FINISH LINE ---
+    // Halfway checkpoint logic barrier tracker (Top of the map grid area layout ring)
+    if (car.y < 160 && Math.abs(car.x - 400) < 50) {
+        passedCheckpoint = true;
+    }
+
+    // Finish Line crossed logic trigger zone check (Bottom of the track layout)
+    if (car.x >= 380 && car.x <= 420 && car.y >= 440 && car.y <= 560) {
+        if (passedCheckpoint) {
+            passedCheckpoint = false;
+            if (currentLap < totalLaps) {
+                currentLap++;
+            } else {
+                gameState = 'FINISHED';
+                elapsedTime = ((Date.now() - startTime) / 1000).toFixed(2);
+                if (!bestTime || parseFloat(elapsedTime) < parseFloat(bestTime)) {
+                    bestTime = elapsedTime;
+                }
+            }
+        }
+    }
+}
+
+function drawTrack() {
+    // 1. Draw Asphalt Track Base Layer Outline Rings
+    ctx.fillStyle = '#333333';
+    ctx.beginPath();
+    ctx.arc(400, 300, trackOuterR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner Grass Island cutout
+    ctx.fillStyle = '#1b4d1b';
+    ctx.beginPath();
+    ctx.arc(400, 300, trackInnerR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. Draw Retro Red/White Apex Rumble Strips Edge Lines Curves
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 4;
+    ctx.setLineDash([15, 15]);
+    ctx.beginPath(); ctx.arc(400, 300, trackOuterR - 2, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = '#ff0000';
+    ctx.beginPath(); ctx.arc(400, 300, trackInnerR + 2, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]); // Reset line configurations maps reset
+
+    // 3. Draw Finish Line Grid Box Pattern Layouts Graphics Grid
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(395, 440, 10, 120);
+    ctx.fillStyle = '#000000';
+    for(let i = 440; i < 560; i += 20) {
+        ctx.fillRect(395, i, 5, 10);
+        ctx.fillRect(400, i + 10, 5, 10);
+    }
+}
+
+function drawPlayerCar() {
+    ctx.save();
+    ctx.translate(car.x, car.y);
+    ctx.rotate(car.angle);
+
+    // Draw Pixel Chassis Frame Body Base
+    ctx.fillStyle = car.color;
+    ctx.fillRect(-car.height / 2, -car.width / 2, car.height, car.width);
+
+    // Accent Windshield glass details rendering boxes
+    ctx.fillStyle = '#55ffff';
+    ctx.fillRect(2, -car.width / 2 + 2, 6, car.width - 4);
+
+    // Rear wing spoiler pixel accents
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-car.height / 2, -car.width / 2 - 2, 3, car.width + 4);
+
+    // Tires pixel maps positions details layout
+    ctx.fillStyle = '#000';
+    ctx.fillRect(6, -car.width / 2 - 1, 5, 2);
+    ctx.fillRect(6, car.width / 2 - 1, 5, 2);
+    ctx.fillRect(-11, -car.width / 2 - 1, 5, 2);
+    ctx.fillRect(-11, car.width / 2 - 1, 5, 2);
+
+    ctx.restore();
+}
+
+function drawHUD() {
+    // Current ongoing track dashboard readout overlays render frames
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 16px "Courier New"';
+    ctx.textAlign = 'left';
+
+    if (gameState === 'RACING') {
+        const liveTimer = ((Date.now() - startTime) / 1000).toFixed(1);
+        ctx.fillText(`LAP: ${currentLap}/${totalLaps}`, 30, 40);
+        ctx.fillText(`TIME: ${liveTimer}s`, 30, 65);
+    } else if (gameState === 'START') {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(150, 200, 500, 200);
+        ctx.strokeStyle = '#ffffff';
+        ctx.strokeRect(150, 200, 500, 200);
+
+        ctx.fillStyle = '#ffff00';
+        ctx.font = 'bold 24px "Courier New"';
+        ctx.textAlign = 'center';
+        ctx.fillText("RETRO GRAND PRIX RACER", 400, 260);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '14px "Courier New"';
+        ctx.fillText("Click inside the screen canvas window area to start", 400, 310);
+    } else if (gameState === 'FINISHED') {
+        ctx.fillStyle = 'rgba(0,0,0,0.85)';
+        ctx.fillRect(150, 180, 500, 240);
+        ctx.strokeStyle = '#00ffcc';
+        ctx.strokeRect(150, 180, 500, 240);
+
+        ctx.fillStyle = '#00ffcc';
+        ctx.font = 'bold 26px "Courier New"';
+        ctx.textAlign = 'center';
+        ctx.fillText("CHEQUERED FLAG!", 400, 240);
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '16px "Courier New"';
+        ctx.fillText(`Your Race Finish Time: ${elapsedTime} seconds`, 400, 290);
+        ctx.fillText(`Personal Best Record: ${bestTime}s`, 400, 320);
+        
+        ctx.fillStyle = '#aaaaaa';
+        ctx.font = '12px "Courier New"';
+        ctx.fillText("Click canvas field to restart qualifying trials", 400, 370);
+    }
+}
+
+function gameLoop() {
+    updatePhysics();
+    
+    // Clear canvas frame out
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Render layers stack paths map
+    drawTrack();
+    drawPlayerCar();
+    drawHUD();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Fire engines up initialization loop executions
+gameLoop();
+</script>
+
+</body>
+</html>
